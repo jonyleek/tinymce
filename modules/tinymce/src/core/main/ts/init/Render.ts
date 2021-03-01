@@ -14,6 +14,7 @@ import ScriptLoader from '../api/dom/ScriptLoader';
 import StyleSheetLoader from '../api/dom/StyleSheetLoader';
 import Editor from '../api/Editor';
 import IconManager from '../api/IconManager';
+import ModelManager from '../api/ModelManager';
 import NotificationManager from '../api/NotificationManager';
 import * as Options from '../api/Options';
 import PluginManager from '../api/PluginManager';
@@ -24,13 +25,17 @@ import WindowManager from '../api/WindowManager';
 import * as NodeType from '../dom/NodeType';
 import * as StyleSheetLoaderRegistry from '../dom/StyleSheetLoaderRegistry';
 import * as ErrorReporter from '../ErrorReporter';
+import * as Rtc from '../Rtc';
 import * as Init from './Init';
+
+interface UrlMeta {
+  url: string;
+  name: Optional<string>;
+}
 
 const DOM = DOMUtils.DOM;
 
-const hasSkipLoadPrefix = (name) => {
-  return name.charAt(0) === '-';
-};
+const hasSkipLoadPrefix = (name: string) => name.charAt(0) === '-';
 
 const loadLanguage = (scriptLoader: ScriptLoader, editor: Editor) => {
   const languageCode = Options.getLanguageCode(editor);
@@ -45,8 +50,28 @@ const loadLanguage = (scriptLoader: ScriptLoader, editor: Editor) => {
   }
 };
 
-const loadTheme = (scriptLoader: ScriptLoader, editor: Editor, suffix: string): Promise<void> => {
+/**
+ * Initiate the download of both theme and model in parallel, then wait for both.
+ *
+ * Each has their own special case where nothing needs to be waited for.
+ */
+const loadThemeAndModel = (scriptLoader: ScriptLoader, editor: Editor, suffix: string): Promise<void> => {
   const theme = Options.getTheme(editor);
+
+  // Special case the 'wait for model' code if RTC is loading, as it will provide a model instead
+  let waitForModel: () => Promise<void>;
+  if (!Rtc.isRtc(editor)) {
+    const model = Options.getModel(editor);
+    const modelUrl = Options.getModelUrl(editor);
+    const url = Type.isString(modelUrl) ? editor.documentBaseURI.toAbsolute(modelUrl) : `models/${model}/model${suffix}.js`;
+    ModelManager.load(model, url).catch(() => {
+      ErrorReporter.modelLoadError(editor, url, model);
+    });
+
+    waitForModel = () => ModelManager.waitFor(model);
+  } else {
+    waitForModel = () => Promise.resolve();
+  }
 
   if (Type.isString(theme)) {
     if (!hasSkipLoadPrefix(theme) && !Obj.has(ThemeManager.urls, theme)) {
@@ -58,16 +83,12 @@ const loadTheme = (scriptLoader: ScriptLoader, editor: Editor, suffix: string): 
     }
 
     const waitForTheme = () => ThemeManager.waitFor(theme);
-    return scriptLoader.loadQueue().then(waitForTheme, waitForTheme);
+    const waitForBoth = () => Promise.allSettled([ waitForTheme(), waitForModel() ]).then(() => Promise.resolve());
+    return scriptLoader.loadQueue().then(waitForBoth, waitForBoth);
   } else {
-    return Promise.resolve();
+    return scriptLoader.loadQueue().then(waitForModel, waitForModel);
   }
 };
-
-interface UrlMeta {
-  url: string;
-  name: Optional<string>;
-}
 
 const getIconsUrlMetaFromUrl = (editor: Editor): Optional<UrlMeta> => Optional.from(Options.getIconsUrl(editor))
   .filter((url) => url.length > 0)
@@ -126,7 +147,7 @@ const loadScripts = (editor: Editor, suffix: string) => {
     }
   };
 
-  loadTheme(scriptLoader, editor, suffix).then(() => {
+  loadThemeAndModel(scriptLoader, editor, suffix).then(() => {
     loadLanguage(scriptLoader, editor);
     loadIcons(scriptLoader, editor, suffix);
     loadPlugins(editor, suffix);

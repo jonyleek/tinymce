@@ -41,6 +41,7 @@ import Styles from './html/Styles';
 import Writer, { WriterSettings } from './html/Writer';
 import IconManager from './IconManager';
 import { EditorModeApi } from './Mode';
+import ModelManager, { Model } from './ModelManager';
 import NotificationManager, { NotificationApi, NotificationSpec } from './NotificationManager';
 import { EditorOptions, RawEditorOptions } from './OptionTypes';
 import PluginManager, { Plugin } from './PluginManager';
@@ -117,6 +118,7 @@ export {
   Shortcuts,
   PluginManager,
   ThemeManager,
+  ModelManager,
   UndoManager,
   WindowManager,
   FakeClipboard,
@@ -138,5 +140,6 @@ export {
   Plugin,
   SchemaSettings,
   Theme,
+  Model,
   WriterSettings
 };
